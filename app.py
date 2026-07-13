@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai  # NAYA IMPORT YAHAN HAI
 import PyPDF2
 from PIL import Image
 import random
