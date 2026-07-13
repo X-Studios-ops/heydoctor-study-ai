@@ -1,5 +1,5 @@
 import streamlit as st
-from google import genai  # NAYA IMPORT YAHAN HAI
+from google import genai
 import PyPDF2
 from PIL import Image
 import random
@@ -27,48 +27,52 @@ if "api_keys" not in st.session_state:
     st.session_state.api_keys = []
 
 # ==========================================
-# 3. SMART 3-API ROTATION ENGINE (Multimodal)
+# 3. SMART 3-API ROTATION ENGINE (New SDK)
 # ==========================================
 def load_api_keys():
     keys = []
-    for i in range(1, 4):
-        key_name = f"GEMINI_API_KEY_{i}"
-        if key_name in st.secrets and st.secrets[key_name]:
-            keys.append(st.secrets[key_name])
+    try:
+        # Streamlit cloud par errors se bachne ke liye safe check
+        if hasattr(st, "secrets"):
+            for i in range(1, 4):
+                key_name = f"GEMINI_API_KEY_{i}"
+                if key_name in st.secrets and st.secrets[key_name]:
+                    keys.append(st.secrets[key_name])
+    except Exception:
+        pass
     return keys
 
 def generate_with_rotation(prompt_data, available_keys):
     """
-    Handles both text prompts and image prompts safely using the NEW google.genai SDK.
+    Handles both text prompts (string) and image prompts (list: [text, image]).
     Automatically rotates through API keys if rate limits are hit.
     """
     if not available_keys:
-        raise Exception("No API keys available! Please check sidebar.")
+        raise Exception("No API keys available! Please check secrets.")
     
     keys_to_try = available_keys.copy()
     random.shuffle(keys_to_try)
     
     for attempt, key in enumerate(keys_to_try):
         try:
-            # Naye SDK me Client aise banate hain
+            # Naya Client-based SDK
             client = genai.Client(api_key=key)
             
-            # Generate response (Naya syntax)
+            # Flash is insanely fast and supports multimodal
             response = client.models.generate_content(
                 model='gemini-1.5-flash',
                 contents=prompt_data
             )
             
-            # Safe text extraction
             try:
                 return response.text
             except ValueError:
                 return "⚠️ **Heydoctor Alert:** The AI blocked this response because it triggered a safety filter."
                 
         except Exception as e:
-            st.toast(f"⚠️ Key {attempt + 1} failed. Error: {str(e)[:50]}...", icon="🔄")
+            st.toast(f"⚠️ Key {attempt + 1} failed. Switching to backup...", icon="🔄")
             if attempt == len(keys_to_try) - 1:
-                raise Exception(f"All API Keys failed! Check your connection or API limit. Last Error: {e}")
+                raise Exception(f"All API Keys failed! Error: {e}")
             continue
 
 if not st.session_state.api_keys:
@@ -170,8 +174,8 @@ with tab2:
                 img_prompt = f"Act as Heydoctor AI (Target: {difficulty}). Look at this uploaded image. {img_action}. Be clear, structured, and use Markdown formatting."
                 
                 try:
-                    # Pass BOTH the prompt and the image object to the API
-                    img_response = generate_with_rotation([img_prompt, image], st.session_state.api_keys)
+                    # Naye SDK me bhi list format [image, text] perfectly kaam karta hai
+                    img_response = generate_with_rotation([image, img_prompt], st.session_state.api_keys)
                     st.markdown('<div class="card">', unsafe_allow_html=True)
                     st.markdown(img_response)
                     st.markdown('</div>', unsafe_allow_html=True)
