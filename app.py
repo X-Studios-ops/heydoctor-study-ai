@@ -39,26 +39,36 @@ def load_api_keys():
 
 def generate_with_rotation(prompt_data, available_keys):
     """
-    Handles both text prompts (string) and image prompts (list: [text, image]).
+    Handles both text prompts and image prompts safely using the NEW google.genai SDK.
     Automatically rotates through API keys if rate limits are hit.
     """
     if not available_keys:
-        raise Exception("No API keys available! Please check secrets.")
+        raise Exception("No API keys available! Please check sidebar.")
     
     keys_to_try = available_keys.copy()
     random.shuffle(keys_to_try)
     
     for attempt, key in enumerate(keys_to_try):
         try:
-            genai.configure(api_key=key)
-            # Flash is insanely fast and supports multimodal (text + images)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt_data)
-            return response.text
+            # Naye SDK me Client aise banate hain
+            client = genai.Client(api_key=key)
+            
+            # Generate response (Naya syntax)
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt_data
+            )
+            
+            # Safe text extraction
+            try:
+                return response.text
+            except ValueError:
+                return "⚠️ **Heydoctor Alert:** The AI blocked this response because it triggered a safety filter."
+                
         except Exception as e:
-            st.toast(f"⚠️ Key {attempt + 1} failed. Switching to backup...", icon="🔄")
+            st.toast(f"⚠️ Key {attempt + 1} failed. Error: {str(e)[:50]}...", icon="🔄")
             if attempt == len(keys_to_try) - 1:
-                raise Exception(f"All API Keys failed! Error: {e}")
+                raise Exception(f"All API Keys failed! Check your connection or API limit. Last Error: {e}")
             continue
 
 if not st.session_state.api_keys:
