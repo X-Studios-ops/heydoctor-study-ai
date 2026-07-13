@@ -1,237 +1,215 @@
 import streamlit as st
 import google.generativeai as genai
 import PyPDF2
-import io
+from PIL import Image
+import random
 from datetime import datetime
 
 # ==========================================
 # 1. PAGE CONFIGURATION & CUSTOM CSS
 # ==========================================
-st.set_page_config(page_title="Heydoctor Study AI | Pro", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Heydoctor Study AI | Ultimate", page_icon="⚡", layout="wide")
 
 st.markdown("""
     <style>
     .main-title { font-size: 3rem; font-weight: 800; color: #4A90E2; margin-bottom: 0px; }
     .sub-title { font-size: 1.2rem; color: #7F8C8D; margin-top: -10px; margin-bottom: 20px; }
-    .card { background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #4A90E2; }
+    .card { background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #4A90E2; margin-bottom: 15px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # 2. SESSION STATE MANAGEMENT
 # ==========================================
-# This keeps the app from resetting every time a button is clicked.
 if "history" not in st.session_state:
     st.session_state.history = []
-if "uploaded_text" not in st.session_state:
-    st.session_state.uploaded_text = ""
-if "api_configured" not in st.session_state:
-    st.session_state.api_configured = False
+if "api_keys" not in st.session_state:
+    st.session_state.api_keys = []
 
 # ==========================================
-# 3. API INITIALIZATION FUNCTION
+# 3. SMART 3-API ROTATION ENGINE (Multimodal)
 # ==========================================
-@st.cache_resource
-def configure_api(api_key):
-    try:
-        genai.configure(api_key=api_key)
-        # Using the advanced Flash model for speed and heavy lifting
-        return genai.GenerativeModel('gemini-1.5-flash')
-    except Exception as e:
-        return None
+def load_api_keys():
+    keys = []
+    for i in range(1, 4):
+        key_name = f"GEMINI_API_KEY_{i}"
+        if key_name in st.secrets and st.secrets[key_name]:
+            keys.append(st.secrets[key_name])
+    return keys
+
+def generate_with_rotation(prompt_data, available_keys):
+    """
+    Handles both text prompts (string) and image prompts (list: [text, image]).
+    Automatically rotates through API keys if rate limits are hit.
+    """
+    if not available_keys:
+        raise Exception("No API keys available! Please check secrets.")
+    
+    keys_to_try = available_keys.copy()
+    random.shuffle(keys_to_try)
+    
+    for attempt, key in enumerate(keys_to_try):
+        try:
+            genai.configure(api_key=key)
+            # Flash is insanely fast and supports multimodal (text + images)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt_data)
+            return response.text
+        except Exception as e:
+            st.toast(f"⚠️ Key {attempt + 1} failed. Switching to backup...", icon="🔄")
+            if attempt == len(keys_to_try) - 1:
+                raise Exception(f"All API Keys failed! Error: {e}")
+            continue
+
+if not st.session_state.api_keys:
+    st.session_state.api_keys = load_api_keys()
 
 # ==========================================
 # 4. SIDEBAR: SETTINGS & PREFERENCES
 # ==========================================
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100) # Placeholder logo
-    st.header("⚙️ App Settings")
+    st.title("⚡ Heydoctor AI")
+    st.header("⚙️ Settings")
     
-    # API Key handling (Secrets first, then manual input fallback)
-    api_key = None
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        st.success("API Key loaded from Secrets!")
+    if st.session_state.api_keys:
+        st.success(f"✅ {len(st.session_state.api_keys)} API Keys Active!")
     else:
-        api_key = st.text_input("Enter Gemini API Key", type="password")
-    
-    if api_key:
-        model = configure_api(api_key)
-        if model:
-            st.session_state.api_configured = True
-        else:
-            st.error("Invalid API Key.")
+        st.error("⚠️ No API Keys found!")
+        fallback_key = st.text_input("Enter Gemini API Key", type="password")
+        if fallback_key:
+            st.session_state.api_keys = [fallback_key]
+            st.rerun()
             
     st.markdown("---")
-    st.header("🧠 Study Preferences")
-    difficulty = st.select_slider("Select Difficulty", options=["Beginner (5th Grade)", "Intermediate (8th Grade)", "Advanced (College)"], value="Intermediate (8th Grade)")
-    tone = st.selectbox("Tutor Personality", ["Encouraging & Fun", "Strict & Academic", "Socratic (Asks questions back)"])
+    st.header("🧠 Difficulty Engine")
+    difficulty = st.select_slider("Select Level", options=["Beginner (5th Grade)", "Intermediate (8th Grade)", "Advanced (College)"], value="Intermediate (8th Grade)")
+    tone = st.selectbox("Tutor Tone", ["Friendly & Encouraging", "Strict & To the Point", "Gaming/Sports Nerd"])
     
     st.markdown("---")
-    if st.button("🗑️ Clear Study History"):
+    if st.button("🗑️ Clear History"):
         st.session_state.history = []
         st.success("History Cleared!")
 
-# Stop execution if API is not set
-if not st.session_state.api_configured:
-    st.title("⚡ Heydoctor Study AI")
-    st.warning("👈 Please provide your Gemini API Key in the sidebar to unlock the application.")
+if not st.session_state.api_keys:
+    st.markdown('<p class="main-title">⚡ Heydoctor Study AI</p>', unsafe_allow_html=True)
+    st.warning("👈 Please configure your API key in the sidebar to start.")
     st.stop()
 
 # ==========================================
-# 5. MAIN UI HEADER
+# 5. MAIN UI HEADER & TABS
 # ==========================================
 st.markdown('<p class="main-title">⚡ Heydoctor Study AI</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">Engineered by Pratyush Ranjan Roul | Enterprise Edition</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">The Ultimate Learning Super-App | Created by Pratyush Ranjan Roul</p>', unsafe_allow_html=True)
 
-# Create layout tabs
-tab1, tab2, tab3 = st.tabs(["📚 Core Study Modes", "📄 Document Analysis", "🕒 Study History"])
+tab1, tab2, tab3, tab4 = st.tabs(["📚 Learn Topic", "📸 Photo Analysis", "📄 PDF Analysis", "🕒 History"])
 
 # ==========================================
-# 6. TAB 1: CORE STUDY MODES (The Mega Engine)
+# TAB 1: CORE STUDY MODES (TEXT)
 # ==========================================
 with tab1:
-    st.markdown("### Choose Your Learning Path")
-    
+    st.markdown("### 🔍 Search & Generate")
     col1, col2 = st.columns([1, 2])
     with col1:
-        mode = st.radio(
-            "Select Tool:", 
-            [
-                "📝 Smart Notes", 
-                "🧠 Deep Explanation", 
-                "🎯 Interactive Quiz", 
-                "💡 Flashcard Generator",
-                "📅 Study Plan Builder"
-            ]
-        )
-    
+        mode = st.radio("Select Tool:", ["📝 Make Notes", "🧠 Detail Explanation", "🎯 Take a Test", "💡 Flashcards"])
     with col2:
-        topic = st.text_area("What are we conquering today?", placeholder="Enter a topic, concept, or paste a paragraph here...", height=130)
+        topic = st.text_area("What topic do you want to master?", placeholder="e.g., Photosynthesis, Newton's Laws...", height=110)
 
-    if st.button("Generate Learning Module 🚀", use_container_width=True):
-        if not topic:
-            st.error("You need to provide a topic first!")
-        else:
-            with st.spinner(f"Heydoctor AI is crafting a module on '{topic}'..."):
+    if st.button("Generate! 🚀", key="btn_text_gen"):
+        if topic:
+            with st.spinner("Processing..."):
+                base_prompt = f"Act as 'Heydoctor AI', an elite tutor built by Pratyush Ranjan Roul. Target Level: {difficulty}. Tone: {tone}. Topic: '{topic}'\n\n"
                 
-                # Dynamic System Prompt Engineering
-                base_prompt = f"""
-                You are 'Heydoctor Study AI', an elite academic tutor created by Pratyush Ranjan Roul.
-                Current Target Audience: {difficulty}.
-                Tutor Tone: {tone}.
-                
-                Topic: "{topic}"
-                """
-                
-                # Mode-Specific Logic
-                if mode == "📝 Smart Notes":
-                    task_prompt = """
-                    Create visually appealing notes. Include:
-                    1. Executive Summary (2 sentences).
-                    2. Core Concepts (Bullet points).
-                    3. Key Terminology/Formulas.
-                    4. Pratyush's Memory Hack (A mnemonic or trick to remember this).
-                    """
-                elif mode == "🧠 Deep Explanation":
-                    task_prompt = """
-                    Explain this concept deeply. Include:
-                    1. Step-by-Step Breakdown.
-                    2. The 'Game/Sport' Analogy: Explain the hardest part using a relatable video game or sports analogy.
-                    3. Real-World Applications (Where is this used?).
-                    """
-                elif mode == "🎯 Interactive Quiz":
-                    task_prompt = """
-                    Generate a test. Include:
-                    1. 3 MCQs (with 4 options each).
-                    2. 2 True/False questions with tricky nuances.
-                    3. 1 Conceptual Essay Question.
-                    Provide the Answer Key at the very bottom.
-                    """
-                elif mode == "💡 Flashcard Generator":
-                    task_prompt = """
-                    Create 5-7 high-yield flashcards. Format them clearly with:
-                    **Front (Question/Term):** ...
-                    **Back (Answer/Definition):** ...
-                    """
-                else: # Study Plan Builder
-                    task_prompt = """
-                    Create a 3-day micro-study plan to master this topic. Break down what to read, practice, and review on Day 1, Day 2, and Day 3.
-                    """
-                
-                final_prompt = base_prompt + "\n\nTASK INSTRUCTIONS:\n" + task_prompt
+                if mode == "📝 Make Notes":
+                    base_prompt += "Provide high-yield notes: 1. Summary, 2. Core Points, 3. Memory Hack."
+                elif mode == "🧠 Detail Explanation":
+                    base_prompt += "Explain step-by-step. Include a relatable real-world or video game analogy for the hardest part."
+                elif mode == "🎯 Take a Test":
+                    base_prompt += "Generate a quiz: 3 MCQs, 1 True/False, 1 Short Essay. Put answers at the bottom."
+                else:
+                    base_prompt += "Generate 5 flashcards formatted as Front: [Term] and Back: [Definition]."
                 
                 try:
-                    response = model.generate_content(final_prompt)
-                    
-                    # Display Results
-                    st.success("Module Generated Successfully!")
+                    response_text = generate_with_rotation(base_prompt, st.session_state.api_keys)
                     st.markdown('<div class="card">', unsafe_allow_html=True)
-                    st.markdown(response.text)
+                    st.markdown(response_text)
                     st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    # Save to history
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    st.session_state.history.append({"time": timestamp, "topic": topic, "mode": mode, "content": response.text})
-                    
-                    # Download Button
-                    st.download_button(
-                        label="📥 Download this Study Module",
-                        data=response.text,
-                        file_name=f"{topic.replace(' ', '_')}_notes.md",
-                        mime="text/markdown"
-                    )
-                    
+                    st.session_state.history.append({"time": datetime.now().strftime("%H:%M:%S"), "title": f"{mode}: {topic[:20]}", "content": response_text})
                 except Exception as e:
-                    st.error(f"API Error: {e}")
+                    st.error(f"Error: {e}")
+        else:
+            st.warning("Enter a topic first!")
 
 # ==========================================
-# 7. TAB 2: DOCUMENT ANALYSIS (PDF Upload)
+# TAB 2: PHOTO ANALYSIS ENGINE (VISION)
 # ==========================================
 with tab2:
-    st.markdown("### 📄 Upload your School Notes or PDF")
-    st.info("Upload a document, and Heydoctor AI will summarize it, extract key facts, or create a quiz based *only* on your document.")
+    st.markdown("### 📸 Upload a Photo")
+    st.info("Upload a diagram, a textbook page, or a math problem. Heydoctor AI will use its Vision capabilities to read it!")
     
-    uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
+    uploaded_img = st.file_uploader("Upload Image (JPG/PNG)", type=["png", "jpg", "jpeg"])
     
-    if uploaded_file is not None:
-        try:
-            pdf_reader = PyPDF2.PdfReader(uploaded_file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text()
-            
-            st.session_state.uploaded_text = text
-            st.success(f"Document uploaded successfully! Extracted {len(text)} characters.")
-            
-            doc_action = st.radio("What should I do with this document?", ["Summarize It", "Extract Key Terms", "Generate Quiz from Text"])
-            
-            if st.button("Process Document 🧠"):
-                with st.spinner("Analyzing document..."):
-                    doc_prompt = f"You are Heydoctor AI. Based ONLY on the following text, perform this task: {doc_action}.\n\nTEXT:\n{st.session_state.uploaded_text[:10000]}" # Limiting text length to avoid token limits
-                    doc_response = model.generate_content(doc_prompt)
-                    
-                    st.markdown("### Document Analysis Result:")
-                    st.markdown(doc_response.text)
-                    
-        except Exception as e:
-            st.error(f"Failed to read PDF: {e}")
+    if uploaded_img:
+        # Display the uploaded image
+        image = Image.open(uploaded_img)
+        st.image(image, caption="Uploaded Image", width=400)
+        
+        img_action = st.radio("What should I do with this photo?", ["🧠 Explain this Diagram", "🧮 Solve this Problem", "📝 Make Notes from this Text/Page"])
+        
+        if st.button("Scan & Process Photo 🔍"):
+            with st.spinner("Heydoctor AI's Vision Engine is scanning your image..."):
+                img_prompt = f"Act as Heydoctor AI (Target: {difficulty}). Look at this uploaded image. {img_action}. Be clear, structured, and use Markdown formatting."
+                
+                try:
+                    # Pass BOTH the prompt and the image object to the API
+                    img_response = generate_with_rotation([img_prompt, image], st.session_state.api_keys)
+                    st.markdown('<div class="card">', unsafe_allow_html=True)
+                    st.markdown(img_response)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    st.session_state.history.append({"time": datetime.now().strftime("%H:%M:%S"), "title": f"Photo Analysis: {img_action}", "content": img_response})
+                except Exception as e:
+                    st.error(f"Vision Analysis Failed: {e}")
 
 # ==========================================
-# 8. TAB 3: STUDY HISTORY LOG
+# TAB 3: PDF DOCUMENT ANALYSIS
 # ==========================================
 with tab3:
-    st.markdown("### 🕒 Your Previous Sessions")
-    if len(st.session_state.history) == 0:
-        st.info("No study sessions recorded yet. Go generate some notes!")
+    st.markdown("### 📄 Upload PDF Notes")
+    uploaded_pdf = st.file_uploader("Upload a PDF file", type="pdf")
+    
+    if uploaded_pdf:
+        try:
+            pdf_reader = PyPDF2.PdfReader(uploaded_pdf)
+            pdf_text = "".join(page.extract_text() for page in pdf_reader.pages)
+            st.success(f"PDF read successfully! ({len(pdf_text)} characters)")
+            
+            pdf_action = st.radio("What to do with PDF?", ["📝 Summarize into Notes", "🎯 Generate a Test from this PDF"])
+            
+            if st.button("Process PDF 📑"):
+                with st.spinner("Analyzing PDF content..."):
+                    pdf_prompt = f"Act as Heydoctor AI. Based strictly on the following text, {pdf_action}:\n\n{pdf_text[:12000]}" # Guard against massive PDFs
+                    try:
+                        pdf_response = generate_with_rotation(pdf_prompt, st.session_state.api_keys)
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.markdown(pdf_response)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                        st.session_state.history.append({"time": datetime.now().strftime("%H:%M:%S"), "title": f"PDF: {pdf_action}", "content": pdf_response})
+                    except Exception as e:
+                        st.error(f"Analysis Failed: {e}")
+        except Exception as e:
+            st.error(f"PDF Error: {e}")
+
+# ==========================================
+# TAB 4: STUDY HISTORY LOG
+# ==========================================
+with tab4:
+    st.markdown("### 🕒 Your Saved Sessions")
+    if not st.session_state.history:
+        st.info("No study sessions recorded yet. Start generating!")
     else:
         for i, session in enumerate(reversed(st.session_state.history)):
-            with st.expander(f"Session {len(st.session_state.history)-i}: {session['topic']} ({session['mode']}) - {session['time']}"):
+            with st.expander(f"[{session['time']}] {session['title']}"):
                 st.markdown(session["content"])
 
-# ==========================================
-# 9. FOOTER
-# ==========================================
+# Footer
 st.markdown("---")
-st.markdown("<p style='text-align: center; color: gray;'>Designed with ❤️ by Pratyush Ranjan Roul | Heydoctor.ai Ecosystem | Pro Tier Architecture</p>", unsafe_allow_html=True)
-
+st.markdown("<p style='text-align: center; color: gray;'>Built with ❤️ by Pratyush Ranjan Roul | Heydoctor.ai Multi-Modal Ecosystem</p>", unsafe_allow_html=True)
