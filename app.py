@@ -4,6 +4,8 @@ import PyPDF2
 from PIL import Image
 import random
 from datetime import datetime
+import base64
+import io
 
 # ==========================================
 # 1. PAGE CONFIGURATION & CUSTOM CSS
@@ -27,24 +29,31 @@ if "api_keys" not in st.session_state:
     st.session_state.api_keys = []
 
 # ==========================================
-# 3. SMART 3-API ROTATION ENGINE (NEW SDK + GEMINI 2.0)
+# 3. OPENROUTER MULTIMODAL ENGINE
 # ==========================================
 def load_api_keys():
     keys = []
     try:
         if hasattr(st, "secrets"):
             for i in range(1, 4):
-                key_name = f"GEMINI_API_KEY_{i}"
+                key_name = f"GEMINI_API_KEY_{i}" # Tu Streamlit secrets me same naam rakh sakta hai
                 if key_name in st.secrets and st.secrets[key_name]:
                     keys.append(st.secrets[key_name])
     except Exception:
         pass
     return keys
 
+# OpenRouter ke liye image ko Base64 me convert karna zaroori hai
+def encode_image(image):
+    buffered = io.BytesIO()
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
 def generate_with_rotation(prompt_data, available_keys):
     """
-    Handles text and image prompts using the new Google GenAI SDK.
-    Includes fallback to Gemini 1.5 Pro if Gemini 2.0 Flash is not found (404).
+    Handles text and image prompts using OpenRouter (OpenAI SDK).
     """
     if not available_keys:
         raise Exception("No API keys available! Please check sidebar.")
@@ -52,33 +61,45 @@ def generate_with_rotation(prompt_data, available_keys):
     keys_to_try = available_keys.copy()
     random.shuffle(keys_to_try)
     
+    # Text vs Image Payload Formatting
+    messages = []
+    if isinstance(prompt_data, list):
+        # Agar multimodal hai (Tab 2: Photo Analysis) -> prompt_data = [image, text]
+        img = prompt_data[0]
+        txt = prompt_data[1]
+        base64_img = encode_image(img)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": txt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}
+                    }
+                ]
+            }
+        ]
+    else:
+        # Agar sirf Text hai (Tab 1 & 3)
+        messages = [{"role": "user", "content": str(prompt_data)}]
+
     for attempt, key in enumerate(keys_to_try):
         try:
-            client = genai.Client(api_key=key)
-            
-            # 🚀 UPGRADED TO gemini-1.5-flash
-            response = client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=prompt_data
+            # 🚀 OPENROUTER CLIENT SETUP
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=key,
             )
             
-            try:
-                return response.text
-            except ValueError:
-                return "⚠️ **Heydoctor Alert:** The AI blocked this response because it triggered a safety filter."
+            response = client.chat.completions.create(
+                model="google/gemini-2.0-flash-001", # OpenRouter ka Gemini 2.0 Flash ID
+                messages=messages
+            )
+            
+            return response.choices[0].message.content
                 
         except Exception as e:
-            # 🛡️ FAIL-SAFE: If 2.0 throws 404, fallback to 1.5 Pro
-            if "404" in str(e):
-                try:
-                    fallback_response = client.models.generate_content(
-                        model='gemini-1.5-pro',
-                        contents=prompt_data
-                    )
-                    return fallback_response.text
-                except Exception as fallback_e:
-                    st.toast(f"⚠️ Backup Model also failed: {fallback_e}", icon="🔄")
-            
             st.toast(f"⚠️ Key {attempt + 1} failed. Switching...", icon="🔄")
             if attempt == len(keys_to_try) - 1:
                 raise Exception(f"All API Keys failed! Error: {e}")
@@ -98,7 +119,7 @@ with st.sidebar:
         st.success(f"✅ {len(st.session_state.api_keys)} API Keys Active!")
     else:
         st.error("⚠️ No API Keys found!")
-        fallback_key = st.text_input("Enter Gemini API Key (AQ...)", type="password")
+        fallback_key = st.text_input("Enter OpenRouter API Key", type="password")
         if fallback_key:
             st.session_state.api_keys = [fallback_key]
             st.rerun()
@@ -115,14 +136,14 @@ with st.sidebar:
 
 if not st.session_state.api_keys:
     st.markdown('<p class="main-title">⚡ Heydoctor Study AI</p>', unsafe_allow_html=True)
-    st.warning("👈 Please configure your 'AQ.' API key in the sidebar to start.")
+    st.warning("👈 Please configure your OpenRouter API key in the sidebar to start.")
     st.stop()
 
 # ==========================================
 # 5. MAIN UI HEADER & TABS
 # ==========================================
 st.markdown('<p class="main-title">⚡ Heydoctor Study AI</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">The Ultimate Learning Super-App | Created by Pratyush Ranjan Roul</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">The Ultimate Learning Super-App | Powered by OpenRouter</p>', unsafe_allow_html=True)
 
 tab1, tab2, tab3, tab4 = st.tabs(["📚 Learn Topic", "📸 Photo Analysis", "📄 PDF Analysis", "🕒 History"])
 
@@ -139,7 +160,7 @@ with tab1:
 
     if st.button("Generate! 🚀", key="btn_text_gen"):
         if topic:
-            with st.spinner("Processing..."):
+            with st.spinner("Processing with OpenRouter..."):
                 base_prompt = f"Act as 'Heydoctor AI', an elite tutor built by Pratyush Ranjan Roul. Target Level: {difficulty}. Tone: {tone}. Topic: '{topic}'\n\n"
                 
                 if mode == "📝 Make Notes":
@@ -182,7 +203,7 @@ with tab2:
                 img_prompt = f"Act as Heydoctor AI (Target: {difficulty}). Look at this uploaded image. {img_action}. Be clear, structured, and use Markdown formatting."
                 
                 try:
-                    # New SDK Multimodal Format
+                    # Payload must be [image, text] for our new OpenRouter function
                     img_response = generate_with_rotation([image, img_prompt], st.session_state.api_keys)
                     st.markdown('<div class="card">', unsafe_allow_html=True)
                     st.markdown(img_response)
@@ -235,3 +256,4 @@ with tab4:
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align: center; color: gray;'>Built with ❤️ by Pratyush Ranjan Roul | Heydoctor.ai Multi-Modal Ecosystem</p>", unsafe_allow_html=True)
+
