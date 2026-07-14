@@ -1,5 +1,5 @@
 import streamlit as st
-from google import genai
+from openai import OpenAI
 import PyPDF2
 from PIL import Image
 import random
