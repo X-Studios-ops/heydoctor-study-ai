@@ -29,21 +29,24 @@ if "api_keys" not in st.session_state:
     st.session_state.api_keys = []
 
 # ==========================================
-# 3. OPENROUTER MULTIMODAL ENGINE
+# 3. OPENROUTER MULTIMODAL ENGINE (Robust Auth)
 # ==========================================
 def load_api_keys():
     keys = []
     try:
         if hasattr(st, "secrets"):
             for i in range(1, 4):
-                key_name = f"GEMINI_API_KEY_{i}" # Tu Streamlit secrets me same naam rakh sakta hai
-                if key_name in st.secrets and st.secrets[key_name]:
-                    keys.append(st.secrets[key_name])
+                key_name = f"GEMINI_API_KEY_{i}"
+                if key_name in st.secrets:
+                    val = st.secrets[key_name]
+                    # Filter: Sirf asli keys ko aage badhne do, spaces remove karo
+                    if isinstance(val, str) and val.strip():
+                        keys.append(val.strip())
     except Exception:
         pass
     return keys
 
-# OpenRouter ke liye image ko Base64 me convert karna zaroori hai
+# OpenRouter ke liye image ko Base64 me convert karna
 def encode_image(image):
     buffered = io.BytesIO()
     if image.mode != 'RGB':
@@ -55,16 +58,18 @@ def generate_with_rotation(prompt_data, available_keys):
     """
     Handles text and image prompts using OpenRouter (OpenAI SDK).
     """
-    if not available_keys:
-        raise Exception("No API keys available! Please check sidebar.")
+    # Ek baar aur check taaki empty keys crash na karein
+    valid_keys = [k for k in available_keys if k and k.strip()]
+    if not valid_keys:
+        raise Exception("No valid API keys found! Check sidebar or secrets.")
     
-    keys_to_try = available_keys.copy()
+    keys_to_try = valid_keys.copy()
     random.shuffle(keys_to_try)
     
     # Text vs Image Payload Formatting
     messages = []
     if isinstance(prompt_data, list):
-        # Agar multimodal hai (Tab 2: Photo Analysis) -> prompt_data = [image, text]
+        # Multimodal (Photo Analysis)
         img = prompt_data[0]
         txt = prompt_data[1]
         base64_img = encode_image(img)
@@ -81,19 +86,24 @@ def generate_with_rotation(prompt_data, available_keys):
             }
         ]
     else:
-        # Agar sirf Text hai (Tab 1 & 3)
+        # Text Only
         messages = [{"role": "user", "content": str(prompt_data)}]
 
     for attempt, key in enumerate(keys_to_try):
         try:
-            # 🚀 OPENROUTER CLIENT SETUP
+            # 🚀 OPENROUTER CLIENT + HEADERS
             client = OpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=key,
+                default_headers={
+                    "HTTP-Referer": "https://heydoctor.ai", # OpenRouter requires this for auth stability
+                    "X-Title": "Heydoctor Study AI"
+                }
             )
             
+            # Use the FREE Gemini 2.0 Flash model on OpenRouter!
             response = client.chat.completions.create(
-                model="google/gemini-2.0-flash-001", # OpenRouter ka Gemini 2.0 Flash ID
+                model="google/gemini-2.0-flash-exp:free", 
                 messages=messages
             )
             
@@ -102,7 +112,7 @@ def generate_with_rotation(prompt_data, available_keys):
         except Exception as e:
             st.toast(f"⚠️ Key {attempt + 1} failed. Switching...", icon="🔄")
             if attempt == len(keys_to_try) - 1:
-                raise Exception(f"All API Keys failed! Error: {e}")
+                raise Exception(f"Error code: 401 - Check your API key. {e}")
             continue
 
 if not st.session_state.api_keys:
