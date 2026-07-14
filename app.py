@@ -56,9 +56,9 @@ def generate_with_rotation(prompt_data, available_keys):
         try:
             client = genai.Client(api_key=key)
             
-            # 🚀 UPGRADED TO GEMINI 2.0 FLASH
+            # 🚀 UPGRADED TO gemini-1.5-flash
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-1.5-flash',
                 contents=prompt_data
             )
             
