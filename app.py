@@ -16,7 +16,7 @@ st.markdown("""
     <style>
     .main-title { font-size: 3rem; font-weight: 800; color: #4A90E2; margin-bottom: 0px; }
     .sub-title { font-size: 1.2rem; color: #7F8C8D; margin-top: -10px; margin-bottom: 20px; }
-    .card { background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #4A90E2; margin-bottom: 15px; }
+    .card { background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 5px solid #4A90E2; margin-bottom: 15px; color: #000000; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -27,9 +27,11 @@ if "history" not in st.session_state:
     st.session_state.history = []
 if "api_keys" not in st.session_state:
     st.session_state.api_keys = []
+if "chat_memory" not in st.session_state:
+    st.session_state.chat_memory = [] # NAYA: Memory Storage
 
 # ==========================================
-# 3. OPENROUTER MULTIMODAL ENGINE (Robust Auth)
+# 3. OPENROUTER MULTIMODAL ENGINE
 # ==========================================
 def load_api_keys():
     keys = []
@@ -39,14 +41,12 @@ def load_api_keys():
                 key_name = f"GEMINI_API_KEY_{i}"
                 if key_name in st.secrets:
                     val = st.secrets[key_name]
-                    # Filter: Sirf asli keys ko aage badhne do, spaces remove karo
                     if isinstance(val, str) and val.strip():
                         keys.append(val.strip())
     except Exception:
         pass
     return keys
 
-# OpenRouter ke liye image ko Base64 me convert karna
 def encode_image(image):
     buffered = io.BytesIO()
     if image.mode != 'RGB':
@@ -55,9 +55,6 @@ def encode_image(image):
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 def generate_with_rotation(prompt_data, available_keys):
-    """
-    Handles text and image prompts using OpenRouter (OpenAI SDK).
-    """
     valid_keys = [k for k in available_keys if k and k.strip()]
     if not valid_keys:
         raise Exception("No valid API keys found! Check sidebar or secrets.")
@@ -65,32 +62,35 @@ def generate_with_rotation(prompt_data, available_keys):
     keys_to_try = valid_keys.copy()
     random.shuffle(keys_to_try)
     
-    # Text vs Image Payload Formatting
-    messages = []
+    # SYSTEM PROMPT: AI ko strict rakhne aur memory ka context dene ke liye
+    messages = [
+        {"role": "system", "content": "You are 'Heydoctor AI', an elite study tutor created exclusively by Pratyush Ranjan Roul. Always maintain context of the conversation. If the user asks a follow-up question, answer it based on previous discussions. Make learning fun with epic analogies."}
+    ]
+
+    # MEMORY INJECTION: Aakhri 4 baatein yaad rakhna
+    for msg in st.session_state.chat_memory[-4:]:
+        messages.append(msg)
+
+    # Naya Prompt set karna
+    user_text = ""
     if isinstance(prompt_data, list):
-        # Multimodal (Photo Analysis)
         img = prompt_data[0]
         txt = prompt_data[1]
+        user_text = txt
         base64_img = encode_image(img)
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": txt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}
-                    }
-                ]
-            }
-        ]
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": txt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+            ]
+        })
     else:
-        # Text Only
-        messages = [{"role": "user", "content": str(prompt_data)}]
+        user_text = str(prompt_data)
+        messages.append({"role": "user", "content": user_text})
 
     for attempt, key in enumerate(keys_to_try):
         try:
-            # 🚀 OPENROUTER CLIENT + HEADERS
             client = OpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=key,
@@ -100,17 +100,19 @@ def generate_with_rotation(prompt_data, available_keys):
                 }
             )
             
-            # Use the FREE Gemini 2.0 Flash Lite model on OpenRouter
-                        # Naya aur stable OpenRouter model ID
             response = client.chat.completions.create(
                 model="google/gemini-2.5-flash",  
                 messages=messages,
                 max_tokens=2000 
             )
 
-
+            ai_answer = response.choices[0].message.content
             
-            return response.choices[0].message.content
+            # MEMORY SAVE KARNA: Taaki agli baar yaad rahe
+            st.session_state.chat_memory.append({"role": "user", "content": user_text})
+            st.session_state.chat_memory.append({"role": "assistant", "content": ai_answer})
+            
+            return ai_answer
                 
         except Exception as e:
             st.toast(f"⚠️ Key {attempt + 1} failed. Switching...", icon="🔄")
@@ -143,9 +145,10 @@ with st.sidebar:
     tone = st.selectbox("Tutor Tone", ["Friendly & Encouraging", "Strict & To the Point", "Gaming/Sports Nerd"])
     
     st.markdown("---")
-    if st.button("🗑️ Clear History"):
+    if st.button("🗑️ Clear History & Memory"):
         st.session_state.history = []
-        st.success("History Cleared!")
+        st.session_state.chat_memory = []
+        st.success("History & Memory Cleared!")
 
 if not st.session_state.api_keys:
     st.markdown('<p class="main-title">⚡ Heydoctor Study AI</p>', unsafe_allow_html=True)
@@ -174,12 +177,12 @@ with tab1:
     if st.button("Generate! 🚀", key="btn_text_gen"):
         if topic:
             with st.spinner("Processing with OpenRouter..."):
-                base_prompt = f"Act as 'Heydoctor AI', an elite tutor built by Pratyush Ranjan Roul. Target Level: {difficulty}. Tone: {tone}. Topic: '{topic}'\n\n"
+                base_prompt = f"Target Level: {difficulty}. Tone: {tone}. Topic: '{topic}'\n\n"
                 
                 if mode == "📝 Make Notes":
                     base_prompt += "Provide high-yield notes: 1. Summary, 2. Core Points, 3. Memory Hack."
                 elif mode == "🧠 Detail Explanation":
-                    base_prompt += "Explain step-by-step. Include a relatable real-world or video game analogy for the hardest part."
+                    base_prompt += "Explain step-by-step. Include a relatable real-world analogy."
                 elif mode == "🎯 Take a Test":
                     base_prompt += "Generate a quiz: 3 MCQs, 1 True/False, 1 Short Essay. Put answers at the bottom."
                 else:
@@ -187,9 +190,8 @@ with tab1:
                 
                 try:
                     response_text = generate_with_rotation(base_prompt, st.session_state.api_keys)
-                    st.markdown('<div class="card">', unsafe_allow_html=True)
-                    st.markdown(response_text)
-                    st.markdown('</div>', unsafe_allow_html=True)
+                    # NAYA UI FIX: Single f-string for perfect rendering
+                    st.markdown(f'<div class="card">\n\n{response_text}\n\n</div>', unsafe_allow_html=True)
                     st.session_state.history.append({"time": datetime.now().strftime("%H:%M:%S"), "title": f"{mode}: {topic[:20]}", "content": response_text})
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -213,14 +215,12 @@ with tab2:
         
         if st.button("Scan & Process Photo 🔍"):
             with st.spinner("Heydoctor AI's Vision Engine is scanning your image..."):
-                img_prompt = f"Act as Heydoctor AI (Target: {difficulty}). Look at this uploaded image. {img_action}. Be clear, structured, and use Markdown formatting."
+                img_prompt = f"Look at this uploaded image. {img_action}. Be clear, structured, and use Markdown formatting."
                 
                 try:
-                    # Payload must be [image, text] for our new OpenRouter function
                     img_response = generate_with_rotation([image, img_prompt], st.session_state.api_keys)
-                    st.markdown('<div class="card">', unsafe_allow_html=True)
-                    st.markdown(img_response)
-                    st.markdown('</div>', unsafe_allow_html=True)
+                    # NAYA UI FIX
+                    st.markdown(f'<div class="card">\n\n{img_response}\n\n</div>', unsafe_allow_html=True)
                     st.session_state.history.append({"time": datetime.now().strftime("%H:%M:%S"), "title": f"Photo Analysis: {img_action}", "content": img_response})
                 except Exception as e:
                     st.error(f"Vision Analysis Failed: {e}")
@@ -242,12 +242,11 @@ with tab3:
             
             if st.button("Process PDF 📑"):
                 with st.spinner("Analyzing PDF content..."):
-                    pdf_prompt = f"Act as Heydoctor AI. Based strictly on the following text, {pdf_action}:\n\n{pdf_text[:12000]}" 
+                    pdf_prompt = f"Based strictly on the following text, {pdf_action}:\n\n{pdf_text[:12000]}" 
                     try:
                         pdf_response = generate_with_rotation(pdf_prompt, st.session_state.api_keys)
-                        st.markdown('<div class="card">', unsafe_allow_html=True)
-                        st.markdown(pdf_response)
-                        st.markdown('</div>', unsafe_allow_html=True)
+                        # NAYA UI FIX
+                        st.markdown(f'<div class="card">\n\n{pdf_response}\n\n</div>', unsafe_allow_html=True)
                         st.session_state.history.append({"time": datetime.now().strftime("%H:%M:%S"), "title": f"PDF: {pdf_action}", "content": pdf_response})
                     except Exception as e:
                         st.error(f"Analysis Failed: {e}")
@@ -269,4 +268,3 @@ with tab4:
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align: center; color: gray;'>Built with ❤️ by Pratyush Ranjan Roul | Heydoctor.ai Multi-Modal Ecosystem</p>", unsafe_allow_html=True)
-
