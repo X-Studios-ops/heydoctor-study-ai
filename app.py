@@ -58,7 +58,6 @@ def generate_with_rotation(prompt_data, available_keys):
     """
     Handles text and image prompts using OpenRouter (OpenAI SDK).
     """
-    # Ek baar aur check taaki empty keys crash na karein
     valid_keys = [k for k in available_keys if k and k.strip()]
     if not valid_keys:
         raise Exception("No valid API keys found! Check sidebar or secrets.")
@@ -96,13 +95,13 @@ def generate_with_rotation(prompt_data, available_keys):
                 base_url="https://openrouter.ai/api/v1",
                 api_key=key,
                 default_headers={
-                    "HTTP-Referer": "https://heydoctor.ai", # OpenRouter requires this for auth stability
+                    "HTTP-Referer": "https://heydoctor.ai",
                     "X-Title": "Heydoctor Study AI"
                 }
             )
             
-            # Use the FREE Gemini 2.0 Flash model on OpenRouter!
-                        response = client.chat.completions.create(
+            # Use the FREE Gemini 2.0 Flash Lite model on OpenRouter
+            response = client.chat.completions.create(
                 model="google/gemini-2.0-flash-lite-preview-02-05:free", 
                 messages=messages
             )
@@ -112,7 +111,7 @@ def generate_with_rotation(prompt_data, available_keys):
         except Exception as e:
             st.toast(f"⚠️ Key {attempt + 1} failed. Switching...", icon="🔄")
             if attempt == len(keys_to_try) - 1:
-                raise Exception(f"Error code: 401 - Check your API key. {e}")
+                raise Exception(f"Error: {e}")
             continue
 
 if not st.session_state.api_keys:
