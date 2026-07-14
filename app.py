@@ -101,10 +101,12 @@ def generate_with_rotation(prompt_data, available_keys):
             )
             
             # Use the FREE Gemini 2.0 Flash Lite model on OpenRouter
+                        # Naya aur stable OpenRouter model ID
             response = client.chat.completions.create(
-                model="google/gemini-2.0-flash-001",  # STABLE MODEL (Kabhi crash nahi hoga)
+                model="google/gemini-2.5-flash",  
                 messages=messages
             )
+
 
             
             return response.choices[0].message.content
