@@ -272,7 +272,7 @@ with tab3:
             }
             
             data = {
-                "model": "google/gemini-2.5-flash", # Tere baaki code se match kar diya
+                "model": "meta-llama/llama-3.1-8b-instruct:free", 
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": True 
             }
