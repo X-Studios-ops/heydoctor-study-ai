@@ -258,12 +258,13 @@ with tab3:
         if st.button("Generate Answer 🚀") and user_query:
             prompt = f"Here is the document content:\n\n{pdf_text[:80000]}\n\nBased ONLY on the above document, answer this: {user_query}"
             
-            # Seedha Streamlit Secrets se API key le raha hai
-            try:
-                OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
-            except KeyError:
-                st.error("⚠️ OPENROUTER_API_KEY not found in secrets!")
+                        # Tere existing Session State se API key le raha hai
+            if not st.session_state.api_keys:
+                st.error("⚠️ API Key not found! Please enter it in the sidebar.")
                 st.stop()
+                
+            OPENROUTER_API_KEY = st.session_state.api_keys[0]
+
             
             headers = {
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
