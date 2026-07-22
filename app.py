@@ -1,6 +1,8 @@
 import streamlit as st
 from openai import OpenAI
-import PyPDF2
+import fitz
+import requests
+import json
 from PIL import Image
 import random
 from datetime import datetime
