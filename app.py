@@ -228,6 +228,97 @@ with tab2:
                     st.error(f"Vision Analysis Failed: {e}")
 
 # ==========================================
+# ⚡ PDF CACHING EXTRACTOR
+# ==========================================
+@st.cache_data
+def extract_text_fast(uploaded_file):
+    text = ""
+    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text("text") + "\n"
+    return text
+
+# ==========================================
+# TAB 3: PDF ANALYSIS ENGINE (GOD MODE)
+# ==========================================
+with tab3:
+    st.markdown("### 📄 Lightning Fast PDF Analysis")
+    st.info("Upload massive study materials and query them instantly with zero lag. ⚡")
+    
+    uploaded_file = st.file_uploader("Upload Study Material (PDF)", type="pdf")
+    
+    if uploaded_file is not None:
+        with st.spinner("⚡ Extracting text at god speed..."):
+            pdf_text = extract_text_fast(uploaded_file)
+        
+        st.success(f"✅ Ready! Extracted {len(pdf_text)} characters instantly.")
+        
+        user_query = st.text_input("Ask anything from this document:", placeholder="e.g., Explain the main concept on page 3...")
+        
+        if st.button("Generate Answer 🚀") and user_query:
+            prompt = f"Here is the document content:\n\n{pdf_text[:80000]}\n\nBased ONLY on the above document, answer this: {user_query}"
+            
+            # Seedha Streamlit Secrets se API key le raha hai
+            try:
+                OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+            except KeyError:
+                st.error("⚠️ OPENROUTER_API_KEY not found in secrets!")
+                st.stop()
+            
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": "google/gemini-2.5-flash", # Tere baaki code se match kar diya
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": True 
+            }
+
+            st.markdown("### 🧠 AI Response:")
+            response_placeholder = st.empty()
+            full_response = ""
+
+            with st.spinner("Connecting to OpenRouter..."):
+                try:
+                    response = requests.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers=headers,
+                        json=data,
+                        stream=True
+                    )
+                    
+                    if response.status_code == 200:
+                        for line in response.iter_lines():
+                            if line:
+                                line = line.decode("utf-8")
+                                if line.startswith("data: ") and line != "data: [DONE]":
+                                    try:
+                                        json_data = json.loads(line[6:])
+                                        chunk = json_data['choices'][0]['delta'].get('content', '')
+                                        full_response += chunk
+                                        response_placeholder.markdown(full_response + "▌")
+                                    except:
+                                        pass
+                        
+                        # Tere UI design se match karne ke liye Card mein daal diya
+                        response_placeholder.markdown(f'<div class="card">\n\n{full_response}\n\n</div>', unsafe_allow_html=True)
+                        
+                        # History mein save kar raha hai taaki Tab 4 mein dikhe
+                        st.session_state.history.append({
+                            "time": datetime.now().strftime("%H:%M:%S"), 
+                            "title": f"PDF Query: {user_query[:20]}", 
+                            "content": full_response
+                        })
+                        
+                    else:
+                        st.error(f"API Error {response.status_code}: Check your API key or model name.")
+                
+                except Exception as e:
+                    st.error(f"Connection Error: {e}")
+
+# ==========================================
 # TAB 4: STUDY HISTORY LOG
 # ==========================================
 with tab4:
