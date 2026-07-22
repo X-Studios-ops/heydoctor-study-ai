@@ -228,33 +228,93 @@ with tab2:
                     st.error(f"Vision Analysis Failed: {e}")
 
 # ==========================================
-# TAB 3: PDF DOCUMENT ANALYSIS
+# ⚡ 1. CACHING EXTRACTOR (SUPER FAST)
+# Yeh function PDF ko strictly ek baar read karega.
 # ==========================================
-with tab3:
-    st.markdown("### 📄 Upload PDF Notes")
-    uploaded_pdf = st.file_uploader("Upload a PDF file", type="pdf")
-    
-    if uploaded_pdf:
-        try:
-            pdf_reader = PyPDF2.PdfReader(uploaded_pdf)
-            pdf_text = "".join(page.extract_text() for page in pdf_reader.pages)
-            st.success(f"PDF read successfully! ({len(pdf_text)} characters)")
-            
-            pdf_action = st.radio("What to do with PDF?", ["📝 Summarize into Notes", "🎯 Generate a Test from this PDF"])
-            
-            if st.button("Process PDF 📑"):
-                with st.spinner("Analyzing PDF content..."):
-                    pdf_prompt = f"Based strictly on the following text, {pdf_action}:\n\n{pdf_text[:12000]}" 
-                    try:
-                        pdf_response = generate_with_rotation(pdf_prompt, st.session_state.api_keys)
-                        # NAYA UI FIX
-                        st.markdown(f'<div class="card">\n\n{pdf_response}\n\n</div>', unsafe_allow_html=True)
-                        st.session_state.history.append({"time": datetime.now().strftime("%H:%M:%S"), "title": f"PDF: {pdf_action}", "content": pdf_response})
-                    except Exception as e:
-                        st.error(f"Analysis Failed: {e}")
-        except Exception as e:
-            st.error(f"PDF Error: {e}")
+@st.cache_data
+def extract_text_fast(uploaded_file):
+    text = ""
+    # PyMuPDF file ko turant process karta hai
+    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text("text") + "\n"
+    return text
 
+# ==========================================
+# 📄 2. MAIN PDF UI & LOGIC
+# ==========================================
+def pdf_analysis_section():
+    st.markdown("## 📄 Lightning Fast PDF Analysis")
+    st.markdown("Upload massive study materials and query them instantly with zero lag. ⚡")
+    
+    uploaded_file = st.file_uploader("Upload Study Material (PDF)", type="pdf")
+    
+    if uploaded_file is not None:
+        # Step 1: Text extraction
+        with st.spinner("⚡ Extracting text at god speed..."):
+            pdf_text = extract_text_fast(uploaded_file)
+        
+        st.success(f"✅ Ready! Extracted {len(pdf_text)} characters instantly.")
+        
+        # Step 2: User Query
+        user_query = st.text_input("Ask anything from this document:", placeholder="e.g., Explain the main concept on page 3...")
+        
+        if st.button("Generate Answer 🚀") and user_query:
+            
+            # Context aur Query ko mila kar prompt banana
+            prompt = f"Here is the document content:\n\n{pdf_text[:80000]}\n\nBased ONLY on the above document, answer this: {user_query}"
+            
+            # 🛑 YAHAN APNA ASLI OPENROUTER API KEY DAAL 🛑
+            OPENROUTER_API_KEY = "TERA_OPENROUTER_API_KEY_YAHAN_DAAL"
+            
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                # 🚀 Fast processing ke liye best model (Llama-3-8b ya Gemini Flash use kar)
+                "model": "google/gemini-flash-1.5", 
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": True # Streaming ON!
+            }
+
+            st.markdown("### 🧠 AI Response:")
+            
+            # Yeh khali dabba banayega jisme answer live type hoga
+            response_placeholder = st.empty()
+            full_response = ""
+
+            with st.spinner("Connecting to OpenRouter..."):
+                try:
+                    response = requests.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers=headers,
+                        json=data,
+                        stream=True
+                    )
+                    
+                    if response.status_code == 200:
+                        for line in response.iter_lines():
+                            if line:
+                                line = line.decode("utf-8")
+                                if line.startswith("data: ") and line != "data: [DONE]":
+                                    try:
+                                        json_data = json.loads(line[6:])
+                                        chunk = json_data['choices'][0]['delta'].get('content', '')
+                                        full_response += chunk
+                                        # Live typing effect
+                                        response_placeholder.markdown(full_response + "▌")
+                                    except:
+                                        pass
+                        
+                        # Type hone ke baad aakhri line se blinking cursor (▌) hata do
+                        response_placeholder.markdown(full_response)
+                    else:
+                        st.error(f"API Error {response.status_code}: Check your API key or model name.")
+                
+                except Exception as e:
+                    st.error(f"Pdf error: {e}")
 # ==========================================
 # TAB 4: STUDY HISTORY LOG
 # ==========================================
