@@ -239,7 +239,7 @@ def extract_text_fast(uploaded_file):
     return text
 
 # ==========================================
-# TAB 3: PDF ANALYSIS ENGINE (GOD MODE)
+# TAB 3: PDF ANALYSIS ENGINE (INTEGRATED)
 # ==========================================
 with tab3:
     st.markdown("### 📄 Lightning Fast PDF Analysis")
@@ -255,69 +255,29 @@ with tab3:
         
         user_query = st.text_input("Ask anything from this document:", placeholder="e.g., Explain the main concept on page 3...")
         
-        if st.button("Generate Answer 🚀") and user_query:
-            prompt = f"Here is the document content:\n\n{pdf_text[:80000]}\n\nBased ONLY on the above document, answer this: {user_query}"
+        if st.button("Generate Answer 🚀", key="btn_pdf_gen") and user_query:
             
-                        # Tere existing Session State se API key le raha hai
-            if not st.session_state.api_keys:
-                st.error("⚠️ API Key not found! Please enter it in the sidebar.")
-                st.stop()
-                
-            OPENROUTER_API_KEY = st.session_state.api_keys[0]
-
+            # Text limit set kar di taaki token limit cross na ho
+            pdf_context = pdf_text[:60000] 
+            prompt = f"Here is the document content:\n\n{pdf_context}\n\nBased ONLY on the above document, answer this query clearly: {user_query}"
             
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": "meta-llama/llama-3.1-8b-instruct:free", 
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": True 
-            }
-
-            st.markdown("### 🧠 AI Response:")
-            response_placeholder = st.empty()
-            full_response = ""
-
-            with st.spinner("Connecting to OpenRouter..."):
+            with st.spinner("🧠 AI is deeply analyzing the PDF..."):
                 try:
-                    response = requests.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers=headers,
-                        json=data,
-                        stream=True
-                    )
+                    # TERA KHUD KA FUNCTION CALL HO RAHA HAI YAHAN 👇
+                    pdf_response = generate_with_rotation(prompt, st.session_state.api_keys)
                     
-                    if response.status_code == 200:
-                        for line in response.iter_lines():
-                            if line:
-                                line = line.decode("utf-8")
-                                if line.startswith("data: ") and line != "data: [DONE]":
-                                    try:
-                                        json_data = json.loads(line[6:])
-                                        chunk = json_data['choices'][0]['delta'].get('content', '')
-                                        full_response += chunk
-                                        response_placeholder.markdown(full_response + "▌")
-                                    except:
-                                        pass
-                        
-                        # Tere UI design se match karne ke liye Card mein daal diya
-                        response_placeholder.markdown(f'<div class="card">\n\n{full_response}\n\n</div>', unsafe_allow_html=True)
-                        
-                        # History mein save kar raha hai taaki Tab 4 mein dikhe
-                        st.session_state.history.append({
-                            "time": datetime.now().strftime("%H:%M:%S"), 
-                            "title": f"PDF Query: {user_query[:20]}", 
-                            "content": full_response
-                        })
-                        
-                    else:
-                        st.error(f"API Error {response.status_code}: Check your API key or model name.")
-                
+                    # UI Formatting (Tere app ke design ke hisaab se)
+                    st.markdown(f'<div class="card">\n\n{pdf_response}\n\n</div>', unsafe_allow_html=True)
+                    
+                    # History mein save karna
+                    st.session_state.history.append({
+                        "time": datetime.now().strftime("%H:%M:%S"), 
+                        "title": f"PDF Query: {user_query[:20]}", 
+                        "content": pdf_response
+                    })
+                    
                 except Exception as e:
-                    st.error(f"Connection Error: {e}")
+                    st.error(f"Analysis Failed: {e}")
 
 # ==========================================
 # TAB 4: STUDY HISTORY LOG
